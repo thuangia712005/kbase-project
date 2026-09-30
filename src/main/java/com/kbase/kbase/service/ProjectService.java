@@ -2,7 +2,9 @@ package com.kbase.kbase.service;
 
 import com.kbase.kbase.dto.CreateProjectRequest;
 import com.kbase.kbase.dto.InviteMemberRequest;
+import com.kbase.kbase.dto.MemberResponse;
 import com.kbase.kbase.dto.ProjectResponse;
+import com.kbase.kbase.dto.UpdateProjectRequest;
 import com.kbase.kbase.entity.Project;
 import com.kbase.kbase.entity.ProjectMember;
 import com.kbase.kbase.entity.User;
@@ -50,7 +52,7 @@ public class ProjectService {
         List<ProjectMember> memberships = projectMemberRepository.findByUserId(user.getId());
 
         return memberships.stream()
-                .map(m -> toResponse(m.getProject()))
+                .map(m -> toSummaryResponse(m.getProject()))
                 .toList();
     }
 
@@ -63,11 +65,40 @@ public class ProjectService {
         return toResponse(project);
     }
 
+    public ProjectResponse updateProject(Long projectId, String requesterEmail, UpdateProjectRequest request) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        if (!project.getOwner().getEmail().equals(requesterEmail)) {
+            throw new IllegalArgumentException("Only the project owner can update this project");
+        }
+
+        if (request.getName() != null && !request.getName().isBlank()) {
+            project.setName(request.getName());
+        }
+        if (request.getDescription() != null) {
+            project.setDescription(request.getDescription());
+        }
+
+        Project updated = projectRepository.save(project);
+        return toResponse(updated);
+    }
+
+    public void deleteProject(Long projectId, String requesterEmail) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        if (!project.getOwner().getEmail().equals(requesterEmail)) {
+            throw new IllegalArgumentException("Only the project owner can delete this project");
+        }
+
+        projectRepository.delete(project);
+    }
+
     public void inviteMember(Long projectId, String requesterEmail, InviteMemberRequest request) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
-        // Chỉ Owner mới được mời thành viên
         if (!project.getOwner().getEmail().equals(requesterEmail)) {
             throw new IllegalArgumentException("Only the project owner can invite members");
         }
@@ -98,13 +129,62 @@ public class ProjectService {
         }
     }
 
+    public void removeMember(Long projectId, String requesterEmail, Long memberUserId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        if (!project.getOwner().getEmail().equals(requesterEmail)) {
+            throw new IllegalArgumentException("Only the project owner can remove members");
+        }
+
+        if (project.getOwner().getId().equals(memberUserId)) {
+            throw new IllegalArgumentException("Cannot remove the project owner");
+        }
+
+        ProjectMember member = projectMemberRepository.findByProjectId(projectId).stream()
+                .filter(m -> m.getUser().getId().equals(memberUserId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("This user is not a member of the project"));
+
+        projectMemberRepository.delete(member);
+    }
+
     private ProjectResponse toResponse(Project project) {
+        List<ProjectMember> members = projectMemberRepository.findByProjectId(project.getId());
+
+        List<MemberResponse> memberResponses = members.stream()
+                .map(m -> {
+                    User u = m.getUser();
+                    boolean isOwner = project.getOwner() != null && u.getId().equals(project.getOwner().getId());
+                    return MemberResponse.builder()
+                            .userId(u.getId())
+                            .email(u.getEmail())
+                            .name(u.getFullName())
+                            .role(isOwner ? "OWNER" : "MEMBER")
+                            .build();
+                })
+                .toList();
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .name(project.getName())
                 .description(project.getDescription())
-                .ownerEmail(project.getOwner().getEmail())
+                .ownerEmail(project.getOwner() != null ? project.getOwner().getEmail() : null)
                 .createdAt(project.getCreatedAt())
+                .members(memberResponses)
+                .build();
+    }
+
+    private ProjectResponse toSummaryResponse(Project project) {
+        int count = projectMemberRepository.findByProjectId(project.getId()).size();
+
+        return ProjectResponse.builder()
+                .id(project.getId())
+                .name(project.getName())
+                .description(project.getDescription())
+                .ownerEmail(project.getOwner() != null ? project.getOwner().getEmail() : null)
+                .createdAt(project.getCreatedAt())
+                .memberCount(count)
                 .build();
     }
 }

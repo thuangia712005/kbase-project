@@ -1,5 +1,6 @@
 package com.kbase.kbase.service;
 
+import com.kbase.kbase.dto.DocumentResponse;
 import com.kbase.kbase.entity.Document;
 import com.kbase.kbase.entity.Project;
 import com.kbase.kbase.entity.User;
@@ -45,7 +46,7 @@ public class DocumentService {
         }
     }
 
-    public Document uploadDocument(Long projectId, String uploaderEmail, MultipartFile file) {
+    public DocumentResponse uploadDocument(Long projectId, String uploaderEmail, MultipartFile file) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
@@ -82,11 +83,42 @@ public class DocumentService {
                 .storagePath(storagePath)
                 .build();
 
-        return documentRepository.save(document);
+        Document savedDocument = documentRepository.save(document);
+        return toResponse(savedDocument);
     }
 
-    public List<Document> getDocumentsByProject(Long projectId) {
-        return documentRepository.findByProjectId(projectId);
+    public List<DocumentResponse> getDocumentsByProject(Long projectId) {
+        return documentRepository.findByProjectId(projectId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    public void deleteDocument(Long documentId, String requesterEmail) {
+        Document document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new IllegalArgumentException("Document not found"));
+
+        User requester = userRepository.findByEmail(requesterEmail)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        boolean isUploader = document.getUploadedBy().getId().equals(requester.getId());
+        boolean isProjectOwner = document.getProject().getOwner().getId().equals(requester.getId());
+
+        if (!isUploader && !isProjectOwner) {
+            throw new IllegalArgumentException("You don't have permission to delete this document");
+        }
+
+        try {
+            minioClient.removeObject(
+                    io.minio.RemoveObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(document.getStoragePath())
+                            .build()
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to delete file from MinIO", e);
+        }
+
+        documentRepository.delete(document);
     }
 
     public InputStream downloadDocument(Long documentId) {
@@ -105,8 +137,23 @@ public class DocumentService {
         }
     }
 
-    public Document getDocumentById(Long documentId) {
-        return documentRepository.findById(documentId)
+    public DocumentResponse getDocumentById(Long documentId) {
+        Document document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new IllegalArgumentException("Document not found"));
+        return toResponse(document);
+    }
+
+    private DocumentResponse toResponse(Document document) {
+        return DocumentResponse.builder()
+                .id(document.getId())
+                .projectId(document.getProject().getId())
+                .fileName(document.getFileName())
+                .fileType(document.getFileType())
+                .fileSize(document.getFileSize())
+                .storagePath(document.getStoragePath())
+                .uploadedByEmail(document.getUploadedBy().getEmail())
+                .uploadedByName(document.getUploadedBy().getFullName())
+                .uploadedAt(document.getUploadedAt())
+                .build();
     }
 }

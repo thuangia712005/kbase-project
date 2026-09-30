@@ -1,6 +1,7 @@
 package com.kbase.kbase.controller;
 
-import com.kbase.kbase.entity.Document;
+import com.kbase.kbase.dto.ApiResponse;
+import com.kbase.kbase.dto.DocumentResponse;
 import com.kbase.kbase.service.DocumentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
@@ -23,24 +24,38 @@ public class DocumentController {
     private final DocumentService documentService;
 
     @PostMapping(value = "/project/{projectId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Document> upload(
+    public ResponseEntity<DocumentResponse> upload(
             Authentication authentication,
             @PathVariable Long projectId,
             @RequestParam("file") MultipartFile file) {
 
         String email = authentication.getName();
-        Document document = documentService.uploadDocument(projectId, email, file);
-        return ResponseEntity.ok(document);
+        DocumentResponse response = documentService.uploadDocument(projectId, email, file);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/project/{projectId}")
-    public ResponseEntity<List<Document>> listByProject(@PathVariable Long projectId) {
+    public ResponseEntity<List<DocumentResponse>> listByProject(@PathVariable Long projectId) {
         return ResponseEntity.ok(documentService.getDocumentsByProject(projectId));
+    }
+
+    @DeleteMapping("/{documentId}")
+    public ResponseEntity<ApiResponse> delete(
+            Authentication authentication,
+            @PathVariable Long documentId) {
+
+        String email = authentication.getName();
+        documentService.deleteDocument(documentId, email);
+        return ResponseEntity.ok(
+                ApiResponse.builder()
+                        .message("Document deleted successfully")
+                        .build()
+        );
     }
 
     @GetMapping("/{documentId}/download")
     public ResponseEntity<InputStreamResource> download(@PathVariable Long documentId) {
-        Document document = documentService.getDocumentById(documentId);
+        DocumentResponse document = documentService.getDocumentById(documentId);
         InputStream inputStream = documentService.downloadDocument(documentId);
 
         return ResponseEntity.ok()
